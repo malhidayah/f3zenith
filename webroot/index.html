@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>F3Zenith</title>
+<style>
+/* antislop active: after (global preference). DESIGN.md - monokrom, MOTION 1 */
+:root{--bg:#0a0a0a;--card:#141414;--card2:#1b1b1b;--line:#262626;
+  --fg:#ededed;--dim:#9e9e9e;--acc:#ffffff;--hot:#ff8a8a}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;padding:16px 14px 48px}
+h1{font-size:18px;margin:0 0 12px;font-weight:600}
+h1 small{color:var(--dim);font-weight:400;font-size:12px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;
+  padding:16px;margin-bottom:12px}
+.label{color:var(--dim);font-size:11px;text-transform:uppercase;letter-spacing:.5px;
+  margin-bottom:10px}
+.prof{display:grid;grid-template-columns:repeat(auto-fit,minmax(90px,1fr));gap:8px}
+.prof button{padding:15px 6px;border-radius:10px;font-size:13px}
+.prof button.on{background:var(--acc);border-color:var(--acc);color:#000;font-weight:600}
+.row{display:flex;gap:8px;flex-wrap:wrap}
+.row button{flex:1;min-width:72px;padding:10px;font-size:13px}
+.row button.on{background:var(--acc);border-color:var(--acc);color:#000;font-weight:600}
+button{font:inherit;color:var(--fg);background:var(--card2);
+  border:1px solid var(--line);border-radius:10px;padding:10px 12px;
+  cursor:pointer;transition:background .15s ease,border-color .15s ease}
+button:active{filter:brightness(1.6)}
+button[disabled]{opacity:.45;cursor:default}
+button:focus-visible{outline:2px solid var(--fg);outline-offset:2px}
+.thermo{display:flex;gap:14px;align-items:center}
+.t{text-align:center;flex:1}
+.t b{display:block;font-size:26px;font-weight:600}
+.t b.hot{color:var(--hot)}
+.t span{color:var(--dim);font-size:11px}
+.bar{height:6px;background:var(--card2);border-radius:3px;overflow:hidden;margin-top:8px}
+.bar i{display:block;height:100%;background:var(--fg)}
+.bar i.hot{background:var(--hot)}
+input[type=range]{width:100%;accent-color:#fff;margin:8px 0 0}
+input[type=range]:focus-visible{outline:2px solid var(--fg);outline-offset:2px}
+.out{font:12px/1.5 ui-monospace,Menlo,Consolas,monospace;color:var(--fg);
+  background:#000;border:1px solid var(--line);border-radius:10px;padding:10px;
+  white-space:pre-wrap;word-break:break-word;min-height:1em}
+.note{color:var(--dim);font-size:11px;margin-top:8px;line-height:1.5}
+</style>
+</head>
+<body>
+<h1>F3Zenith<small> &nbsp;Oppo F3 / MT6750</small></h1>
+
+<div class="card">
+  <div class="label">Thermal</div>
+  <div class="thermo">
+    <div class="t"><b id="tcpu">--</b><span>CPU</span></div>
+    <div class="t"><b id="tbat">--</b><span>Baterai</span></div>
+  </div>
+  <div class="bar"><i id="tbar" style="width:0"></i></div>
+</div>
+
+<div class="card">
+  <div class="label">Profil</div>
+  <div class="prof">
+    <button type="button" data-p="performance" onclick="prof('performance',this)">Performance</button>
+    <button type="button" data-p="balanced"   onclick="prof('balanced',this)">Balanced</button>
+    <button type="button" data-p="eco"        onclick="prof('eco',this)">ECO</button>
+  </div>
+  <div class="note">Performance panas dan boros. ECO adem dan awet. Balanced buat harian.</div>
+</div>
+
+<div class="card">
+  <div class="label">CPU Governor</div>
+  <div class="row" id="gows"></div>
+  <div class="note" id="govNow">little: - / big: -</div>
+</div>
+
+<div class="card">
+  <div class="label">I/O Scheduler</div>
+  <div class="row">
+    <button type="button" onclick="io('cfq',this)" id="io_cfq">cfq</button>
+    <button type="button" onclick="io('deadline',this)" id="io_deadline">deadline</button>
+    <button type="button" onclick="io('noop',this)" id="io_noop">noop</button>
+  </div>
+  <div class="note">cfq responsif, deadline hemat baterai, noop paling cepat.</div>
+</div>
+
+<div class="card">
+  <div class="label">CPU Limit: <span id="lv">100</span>%</div>
+  <input type="range" id="lim" min="30" max="100" step="5" value="100"
+    oninput="document.getElementById('lv').textContent=this.value"
+    onchange="lim(this.value)">
+  <div class="note">Batas atas frekuensi CPU. Turunkan kalau HP panas.</div>
+</div>
+
+<div class="card">
+  <div class="label">Log</div>
+  <div class="out" id="log" role="status">Menunggu perintah.</div>
+</div>
+
+<script>
+function tok(){var m=location.search.match(/[?&]t=([A-Za-z0-9]+)/);return m?m[1]:'';}
+var TOKEN=tok(), BASE='http://127.0.0.1:8080/';
+var S={}, busy=false;
+
+function log(t){document.getElementById('log').textContent=t;}
+
+function api(a,v){
+  return fetch(BASE+'cgi-bin/act?t='+TOKEN+'&a='+a+(v!==undefined?'&v='+v:''))
+    .then(function(r){return r.text();});
+}
+function parse(t){
+  var o={};
+  t.trim().split('\n').forEach(function(l){
+    var i=l.indexOf('=');
+    if(i>0)o[l.slice(0,i)]=l.slice(i+1);
+  });
+  return o;
+}
+function busyLock(text,btn){
+  busy=true; log(text);
+  if(btn){btn.disabled=true;btn.dataset.label=btn.textContent;}
+}
+function busyUnlock(btn){
+  busy=false;
+  if(btn){btn.disabled=false;delete btn.dataset.label;}
+}
+
+function refresh(){
+  return api('zenith').then(function(t){
+    if(t.indexOf('unauthorized')>=0){log('token salah. Buka lewat F3 Hub.');return;}
+    S=parse(t);
+    var cpu=Math.round(S.tcpu/1000), bat=Math.round(S.tbat/1000);
+    var tc=document.getElementById('tcpu'), tb=document.getElementById('tbat');
+    tc.textContent=cpu; tb.textContent=bat;
+    tc.className=cpu>60?'hot':''; tb.className=bat>45?'hot':'';
+    var pct=Math.max(0,Math.min(100,(S.tcpu-25000)/1000/0.7));
+    var bar=document.getElementById('tbar');
+    bar.style.width=pct+'%';
+    bar.className=pct>70?'hot':'';
+    var box=document.getElementById('gows');
+    box.innerHTML='';
+    (S.gl0||'').split(/\s+/).forEach(function(g){
+      if(!g)return;
+      var b=document.createElement('button');
+      b.type='button'; b.textContent=g;
+      if(g===S.gov0)b.className='on';
+      b.onclick=function(){gov(g,b);};
+      box.appendChild(b);
+    });
+    ['cfq','deadline','noop'].forEach(function(s){
+      var e=document.getElementById('io_'+s);
+      if(e)e.className=(S.iosched===s)?'on':'';
+    });
+    var map={performance:['performance','noop'],balanced:['interactive','cfq'],eco:['powersave','deadline']};
+    document.querySelectorAll('.prof button').forEach(function(b){
+      var m=map[b.dataset.p];
+      b.className=(S.gov0===m[0]&&S.iosched===m[1])?'on':'';
+    });
+    // little cluster is always online and always written, so it drives the
+    // highlight. The big cluster parks itself, so it is reported separately
+    // instead of being allowed to silently mark the profile as not applied.
+    var gn=document.getElementById('govNow');
+    if(gn) gn.textContent='little: '+(S.gov0||'-')+' / big: '+(S.gov4||'-');
+  }).catch(function(e){log('Gagal: '+e);});
+}
+
+function prof(p,btn){
+  if(busy)return; busyLock('Menerapkan profil '+p+'...',btn);
+  api('profile',p).then(function(t){log(t);setTimeout(refresh,700);})
+    .catch(function(e){log('Gagal: '+e);}).finally(function(){busyUnlock(btn);});
+}
+function gov(g,btn){
+  if(busy)return; busyLock('Mengganti governor ke '+g+'...',btn);
+  api('gov',g).then(function(t){log(t);setTimeout(refresh,700);})
+    .catch(function(e){log('Gagal: '+e);}).finally(function(){busyUnlock(btn);});
+}
+function io(s,btn){
+  if(busy)return; busyLock('Mengganti I/O scheduler ke '+s+'...',btn);
+  api('iosched',s).then(function(t){log(t);setTimeout(refresh,700);})
+    .catch(function(e){log('Gagal: '+e);}).finally(function(){busyUnlock(btn);});
+}
+function lim(v){
+  if(busy)return; busyLock('Membatasi CPU ke '+v+'%...');
+  api('freq',v).then(function(t){log(t);setTimeout(refresh,700);})
+    .catch(function(e){log('Gagal: '+e);}).finally(function(){busy=false;});
+}
+
+refresh();
+setInterval(function(){ if(!busy) refresh(); }, 5000);
+</script>
+</body>
+</html>

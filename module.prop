@@ -1,0 +1,6 @@
+id=f3zenith
+name=F3Zenith
+version=v1.0
+versionCode=1
+author=opencode
+description=AZenith-style perf module for Oppo F3: CPU profiles, governor, IO scheduler, freq limit, thermal

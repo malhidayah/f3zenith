@@ -1,0 +1,4 @@
+﻿# Keep Unix line endings for Magisk/Android scripts
+*.sh text eol=lf
+webroot/index.html text eol=lf
+module.prop text eol=lf
